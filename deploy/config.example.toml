@@ -1,0 +1,30 @@
+# aither-relay konfiguráció – másold ide: ~/.config/aither-relay/config.toml
+# A jelszavakat csak a szerveren lévő példányba írd, a repóba ne.
+
+[source]                      # a gyors (NVMe) szerver qBittorrentje, ahol a szkript fut
+url = "http://127.0.0.1:10877"
+username = "accofil"
+password = "CHANGE_ME"
+fast_root = "/home/accofil/torrents/qbittorrent"   # ide tölt az autobrr (NVMe)
+hdd_dir   = "/home/accofil/storage/aither"         # ide költözik 30 perc után (HDD)
+
+[target]                      # a távoli seedbox
+ssh_host = "canada"           # ~/.ssh/config Host bejegyzés (kulcsos belépés)
+qbit_port = 10395             # a távoli qBittorrent WebUI portja (csak 127.0.0.1-en figyel)
+username = "accofil"
+password = "CHANGE_ME"
+root = "/home/accofil/torrents/qbittorrent"        # az rsync démon modulja ezt a mappát látja
+dir  = "/home/accofil/torrents/qbittorrent/aither" # ide kerülnek az adatok (a root-on belül)
+# rsync démon közvetlen TCP-n (gyors). Ha üres, rsync SSH-n megy (lassú, ~200 Mbit/s tengerentúlra).
+rsync_url = "rsync://relay@REMOTE_IP:8730/relay"
+rsync_password_file = "~/.config/aither-relay/rsync.pass"
+
+[relay]
+categories = ["aither"]         # csak az ilyen kategóriájú torrentek mennek át
+move_after_minutes = 30         # ennyi perccel a letöltés vége után költözik HDD-re
+max_parallel_transfers = 2      # egyszerre ennyi rsync fut (a távoli hash-ellenőrzés nem foglal helyet)
+min_free_gb_remote = 100        # ennyi helynek mindig maradnia kell a távoli gépen
+poll_seconds = 20               # ennyi másodpercenként lép tovább a folyamat
+verify_timeout_hours = 6        # ha a távoli hash-ellenőrzés eddig sem ér véget: MANUAL
+max_transfer_attempts = 3
+tunnel_port = 18395             # helyi port az SSH-alagúthoz a távoli WebUI felé

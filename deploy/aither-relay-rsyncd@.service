@@ -1,0 +1,15 @@
+# A TÁVOLI gépre: /etc/systemd/system/aither-relay-rsyncd@.service
+# Engedélyezés: sudo systemctl enable --now aither-relay-rsyncd@USER
+[Unit]
+Description=rsync daemon receiving Aither relay data
+After=network-online.target
+
+[Service]
+User=%i
+Group=%i
+ExecStart=/usr/bin/rsync --daemon --no-detach --config=/home/%i/.config/aither-relay/rsyncd.conf
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

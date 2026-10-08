@@ -1,0 +1,15 @@
+[Unit]
+Description=Aither relay: NVMe -> HDD -> remote seedbox
+After=network-online.target qbittorrent@%i.service
+Wants=network-online.target
+
+[Service]
+User=%i
+Group=%i
+WorkingDirectory=/home/%i/qbit-aither-relay
+ExecStart=/usr/bin/python3 -m aither_relay run
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
