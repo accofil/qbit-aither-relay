@@ -50,6 +50,8 @@ STAGE_TAGS = {
     "manual": "relay:MANUAL",
 }
 ALL_TAGS = ",".join(sorted(set(STAGE_TAGS.values())))
+MOVE_RETRY_MINUTES = 15
+MAX_MOVE_TRIES = 3
 
 
 # ----------------------------------------------------------------------------- config
@@ -333,21 +335,64 @@ class Relay:
             self._set(h, "on_hdd")
 
     def check_moved(self, h: str, t: dict) -> None:
-        if t["state"] == "moving" or is_under(t["save_path"], self.cfg.fast_root):
+        st = self.state.items[h]
+        if t["state"] == "moving":
             return
-        if t["state"] in ("missingFiles", "error"):
-            log.warning("[%s] %s after move, rechecking", h[:8], t["state"])
-            self.src.recheck(h)
+        if is_under(t["save_path"], self.cfg.fast_root):
+            # qBittorrent gave up on the move (e.g. the HDD was full): ask again a few times
+            if time.time() - st["since"] < MOVE_RETRY_MINUTES * 60:
+                return
+            tries = st.get("move_tries", 0) + 1
+            if tries > MAX_MOVE_TRIES:
+                self._manual(h, f"qBittorrent did not move the data to {self.cfg.hdd_dir} after {MAX_MOVE_TRIES} tries")
+                return
+            log.warning("[%s] still on the fast disk %d min after the move request - asking again (%d/%d)",
+                        h[:8], MOVE_RETRY_MINUTES, tries, MAX_MOVE_TRIES)
+            self.src.set_location(h, self.cfg.hdd_dir)
+            self._set(h, "moving", move_tries=tries)
+            return
+        if t["state"] in ("missingFiles", "error") or self._missing_files(t):
+            self._recheck_once(h, t, "after move")
             return
         self._file_names.pop(h, None)
         self._set(h, "on_hdd")
+
+    def _missing_files(self, t: dict) -> list[str]:
+        """Files qBittorrent lists but that are absent or have the wrong size on disk.
+
+        qBittorrent keeps reporting a torrent as complete when a move silently failed half way,
+        so the files are checked on disk before anything is sent or deleted."""
+        missing = []
+        for f in self.src.files(t["hash"]):
+            path = os.path.join(t["save_path"], f["name"])
+            try:
+                if os.path.getsize(path) != f["size"]:
+                    missing.append(f["name"])
+            except OSError:
+                missing.append(f["name"])
+        return missing
+
+    def _recheck_once(self, h: str, t: dict, why: str) -> None:
+        """Start one local hash check; qBittorrent then re-downloads whatever is missing."""
+        st = self.state.items[h]
+        if t["state"] in CHECKING_STATES or t["progress"] < 1:
+            return  # a check or the re-download is still running
+        if time.time() - st.get("local_recheck_at", 0) < 30 * 60:
+            return
+        log.warning("[%s] local files incomplete %s - local hash check, qBittorrent re-downloads the gaps", h[:8], why)
+        st["local_recheck_at"] = time.time()
+        self.state.save()
+        self.src.recheck(h)
 
     # -- stage: add to remote + rsync --------------------------------------------------
     def maybe_start_transfer(self, h: str, t: dict) -> None:
         active = sum(1 for st in self.state.items.values() if st["stage"] in ("added", "transferring"))
         if active >= self.cfg.max_parallel_transfers:
             return
-        if t["state"] in CHECKING_STATES:
+        if t["state"] in CHECKING_STATES or t["progress"] < 1:
+            return
+        if self._missing_files(t):
+            self._recheck_once(h, t, "before sending")
             return
         pending = sum(st.get("size", 0) for st in self.state.items.values() if st["stage"] in ("added", "transferring"))
         free = self._remote_free_bytes()
